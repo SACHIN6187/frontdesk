@@ -1,0 +1,49 @@
+name: frontdesk
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: frontdesk
+      POSTGRES_PASSWORD: frontdesk
+      POSTGRES_DB: frontdesk
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U frontdesk"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Local Stripe API emulator — deterministic, no real keys, no network.
+  stripe-mock:
+    image: stripe/stripe-mock:latest
+    ports:
+      - "12111:12111"
+
+  backend:
+    build: ./backend
+    environment:
+      FRONTDESK_DATABASE_URL: postgresql+asyncpg://frontdesk:frontdesk@db:5432/frontdesk
+      FRONTDESK_STRIPE_API_BASE: http://stripe-mock:12111
+      FRONTDESK_JWT_SECRET: local-dev-secret
+      FRONTDESK_CORS_ORIGINS: http://localhost:5173,http://localhost:8080
+    depends_on:
+      db:
+        condition: service_healthy
+      stripe-mock:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      # VITE_API_BASE is baked into the static bundle at build time, so it must be a
+      # build arg (a runtime env var would never reach the already-compiled JS).
+      args:
+        VITE_API_BASE: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
